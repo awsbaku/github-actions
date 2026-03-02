@@ -1,0 +1,45 @@
+# Copy this file to your team repo at: .github/workflows/eval.yml
+#
+# Required org-level secrets:
+#   ANTHROPIC_API_KEY — Claude API key for evaluations
+#
+# Required repo-level variables:
+#   TEAM_NAME — Your team's display name (e.g., "Team Alpha")
+#   TEAM_SIZE — Number of team members (e.g., 3)
+#
+# Optional repo-level variables:
+#   EVAL_SCHEDULE — Custom cron schedule (default: every 6 hours)
+#
+# The evaluation runs on a schedule and can also be triggered manually.
+
+name: Hackathon Evaluation
+run-name: "Hackathon Score — ${{ github.repository }}"
+
+"on":
+  # Scheduled evaluation — adjust cron to your team's assigned time slot
+  # Default: every 6 hours. Organizers may assign different offsets per team.
+  schedule:
+    - cron: "0 */6 * * *"
+
+  # Manual trigger for on-demand evaluation
+  workflow_dispatch:
+
+  # Also evaluate when PRs are opened or updated (optional — remove if too noisy)
+  pull_request:
+    types: [opened, synchronize, ready_for_review]
+    branches: [main]
+
+jobs:
+  evaluate:
+    # Skip draft PRs on pull_request trigger
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    uses: awsbaku/github-actions/.github/workflows/evaluate-prs.yml@main
+    with:
+      team_repo: ${{ github.repository }}
+      team_name: ${{ vars.TEAM_NAME }}
+      team_size: ${{ fromJSON(vars.TEAM_SIZE || '1') }}
+      target_branch: main
+      max_parallel: 3
+      # leaderboard_url: ${{ vars.LEADERBOARD_URL }}
+      # model: claude-sonnet-4-6
+    secrets: inherit

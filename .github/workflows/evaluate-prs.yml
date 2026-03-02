@@ -1,0 +1,254 @@
+name: Hackathon PR Evaluation
+run-name: "Evaluate PRs — ${{ inputs.team_repo || github.repository }}"
+
+"on":
+  workflow_call:
+    inputs:
+      team_repo:
+        description: "Team repository (owner/repo)"
+        type: string
+        required: true
+      team_name:
+        description: "Team display name for leaderboard"
+        type: string
+        required: true
+      team_size:
+        description: "Number of team members"
+        type: number
+        default: 1
+      target_branch:
+        description: "Branch that PRs target (evaluate PRs into this branch)"
+        type: string
+        default: "main"
+      max_parallel:
+        description: "Max concurrent PR evaluations (respect API rate limits)"
+        type: number
+        default: 3
+      leaderboard_url:
+        description: "URL to POST evaluation results to (optional)"
+        type: string
+        default: ""
+      model:
+        description: "Claude model to use for evaluation"
+        type: string
+        default: "claude-sonnet-4-6"
+    secrets:
+      ANTHROPIC_API_KEY:
+        required: true
+      LEADERBOARD_API_KEY:
+        required: false
+
+  workflow_dispatch:
+    inputs:
+      team_repo:
+        description: "Team repository (owner/repo)"
+        type: string
+        required: true
+      team_name:
+        description: "Team display name"
+        type: string
+        required: true
+      team_size:
+        description: "Number of team members"
+        type: number
+        default: 1
+      target_branch:
+        description: "Target branch for PRs"
+        type: string
+        default: "main"
+      max_parallel:
+        description: "Max concurrent evaluations"
+        type: number
+        default: 3
+      leaderboard_url:
+        description: "Leaderboard POST URL"
+        type: string
+        default: ""
+      model:
+        description: "Claude model"
+        type: string
+        default: "claude-sonnet-4-6"
+
+concurrency:
+  group: hackathon-eval-${{ inputs.team_repo }}
+  cancel-in-progress: false
+
+jobs:
+  discover-prs:
+    name: Discover Open PRs
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.list.outputs.matrix }}
+      pr_count: ${{ steps.list.outputs.pr_count }}
+    steps:
+      - name: List open PRs targeting ${{ inputs.target_branch }}
+        id: list
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          MATRIX=$(gh pr list \
+            --repo "${{ inputs.team_repo }}" \
+            --state open \
+            --base "${{ inputs.target_branch }}" \
+            --json number,title,headRefName,additions,deletions,changedFiles \
+            --jq '[.[] | {
+              number: .number,
+              title: .title,
+              branch: .headRefName,
+              additions: .additions,
+              deletions: .deletions,
+              files_changed: .changedFiles
+            }]')
+
+          PR_COUNT=$(echo "$MATRIX" | jq 'length')
+          echo "Found $PR_COUNT open PRs"
+
+          if [ "$PR_COUNT" -eq 0 ]; then
+            echo "matrix=[]" >> "$GITHUB_OUTPUT"
+            echo "pr_count=0" >> "$GITHUB_OUTPUT"
+          else
+            # Escape for GH Actions output
+            echo "matrix=$(echo "$MATRIX" | jq -c .)" >> "$GITHUB_OUTPUT"
+            echo "pr_count=$PR_COUNT" >> "$GITHUB_OUTPUT"
+          fi
+
+  evaluate:
+    name: "Evaluate PR #${{ matrix.pr.number }}"
+    needs: discover-prs
+    if: needs.discover-prs.outputs.pr_count != '0'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      id-token: write
+    strategy:
+      matrix:
+        pr: ${{ fromJSON(needs.discover-prs.outputs.matrix) }}
+      max-parallel: ${{ fromJSON(inputs.max_parallel) }}
+      fail-fast: false
+
+    steps:
+      - name: Checkout evaluation repo
+        uses: actions/checkout@v4
+        with:
+          path: judge
+
+      - name: Checkout team repo
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.team_repo }}
+          path: team-repo
+          fetch-depth: 0
+
+      - name: Collect PR metadata
+        id: meta
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ matrix.pr.number }}
+          TEAM_REPO: ${{ inputs.team_repo }}
+        run: |
+          # Get commit messages for this PR
+          COMMITS=$(gh pr view "$PR_NUMBER" \
+            --repo "$TEAM_REPO" \
+            --json commits \
+            --jq '[.commits[].messageHeadline]')
+
+          COMMIT_COUNT=$(echo "$COMMITS" | jq 'length')
+
+          # Get the full diff (truncate to 80KB to stay within context limits)
+          DIFF=$(gh pr diff "$PR_NUMBER" --repo "$TEAM_REPO" | head -c 80000)
+
+          # Get PR body/description
+          PR_BODY=$(gh pr view "$PR_NUMBER" \
+            --repo "$TEAM_REPO" \
+            --json body \
+            --jq '.body // "No description provided"')
+
+          # Write to files for the evaluation step
+          cat > pr_context.json << JSONEOF
+          {
+            "team": "${{ inputs.team_name }}",
+            "repo": "${{ inputs.team_repo }}",
+            "pr_number": $PR_NUMBER,
+            "pr_title": $(echo '${{ matrix.pr.title }}' | jq -Rs .),
+            "pr_description": $(echo "$PR_BODY" | jq -Rs .),
+            "team_size": ${{ inputs.team_size }},
+            "commit_count": $COMMIT_COUNT,
+            "commit_messages": $COMMITS,
+            "additions": ${{ matrix.pr.additions }},
+            "deletions": ${{ matrix.pr.deletions }},
+            "files_changed": ${{ matrix.pr.files_changed }}
+          }
+          JSONEOF
+
+          echo "$DIFF" > pr_diff.txt
+
+          # Check for README in team repo
+          if [ -f team-repo/README.md ]; then
+            head -c 10000 team-repo/README.md > team_readme.txt
+          else
+            echo "No README found." > team_readme.txt
+          fi
+
+      - name: Run Claude evaluation
+        id: evaluate
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          prompt: |
+            You are a hackathon judge. Evaluate the following PR.
+
+            ## PR Context
+            $(cat pr_context.json)
+
+            ## Team README
+            $(cat team_readme.txt)
+
+            ## PR Diff
+            $(cat pr_diff.txt)
+
+            ## Instructions
+            Follow the evaluation rubric exactly. Output ONLY valid JSON matching the schema.
+            Set timestamp to the current UTC time in ISO 8601 format.
+            Set evaluation_version to "v1.0".
+          claude_args: |
+            --model ${{ inputs.model }}
+            --max-turns 3
+            --append-system-prompt "$(cat judge/prompts/eval-system-prompt.md)"
+            --output-format json
+            --allowedTools "Bash(gh pr view:*)" "Bash(gh pr diff:*)" "Bash(cat:*)" "Read" "Glob" "Grep"
+
+      - name: Post score to PR
+        if: always() && steps.evaluate.outputs.result != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TEAM_REPO: ${{ inputs.team_repo }}
+          PR_NUMBER: ${{ matrix.pr.number }}
+          EVAL_RESULT: ${{ steps.evaluate.outputs.result }}
+        run: |
+          python3 judge/scripts/post_score.py \
+            --result "$EVAL_RESULT" \
+            --repo "$TEAM_REPO" \
+            --pr "$PR_NUMBER"
+
+      - name: Upload to leaderboard
+        if: always() && steps.evaluate.outputs.result != '' && inputs.leaderboard_url != ''
+        env:
+          LEADERBOARD_URL: ${{ inputs.leaderboard_url }}
+          LEADERBOARD_API_KEY: ${{ secrets.LEADERBOARD_API_KEY }}
+          EVAL_RESULT: ${{ steps.evaluate.outputs.result }}
+        run: |
+          curl -sf -X POST "$LEADERBOARD_URL" \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer $LEADERBOARD_API_KEY" \
+            -d "$EVAL_RESULT" \
+            || echo "Warning: Failed to POST to leaderboard (non-fatal)"
+
+      - name: Save evaluation artifact
+        if: always() && steps.evaluate.outputs.result != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-pr-${{ matrix.pr.number }}
+          path: |
+            pr_context.json
+          retention-days: 30
