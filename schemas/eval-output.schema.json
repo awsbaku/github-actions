@@ -37,16 +37,7 @@
     },
     "project_type": {
       "type": "string",
-      "enum": [
-        "frontend",
-        "backend_api",
-        "fullstack",
-        "infrastructure_iac",
-        "ml_pipeline",
-        "data_pipeline",
-        "mobile",
-        "cli_tool"
-      ]
+      "description": "Project classification defined by the hackathon theme prompt (e.g. 'agentic_workflow', 'rag_application')"
     },
     "commit_metadata": {
       "type": "object",

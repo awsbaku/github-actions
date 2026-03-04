@@ -16,7 +16,7 @@ Score hackathon team PRs on a 0-10 scale multiple times per day using Claude as 
                     │  .github/workflows/               │
                     │    evaluate-prs.yml  (reusable)   │
                     │  prompts/                         │
-                    │    eval-system-prompt.md          │
+                    │    aws-bedrock.md (+ more themes) │
                     │  schemas/                         │
                     │    eval-output.schema.json        │
                     │  scripts/                         │
@@ -50,7 +50,8 @@ Score hackathon team PRs on a 0-10 scale multiple times per day using Claude as 
 | Claude integration | `anthropics/claude-code-action@v1` in agent mode | Scheduled runs have no PR event context; agent mode with `prompt:` lets us inject diff + metadata |
 | Structured output | `--output-format json` in `claude_args` | Captures JSON scoring result from `structured_output` action output |
 | PR discovery | `gh pr list` matrix job | Fan out evaluation per-PR with `max-parallel: 3` to respect rate limits |
-| Scoring rubric | 5 dimensions, weighted, 0-10 each | See `prompts/eval-system-prompt.md` for full rubric |
+| Scoring rubric | 5 dimensions, weighted, 0-10 each | See `prompts/aws-bedrock.md` for full rubric |
+| Prompt templates | Theme-selectable via `hackathon_theme` input | Each hackathon gets its own rubric file in `prompts/` |
 | Anti-gaming | Separate detection pass with penalty flags | Catches trivial commits, boilerplate dumps, credential leaks |
 | Score delivery | PR comment + POST to leaderboard endpoint | Teams see scores inline; leaderboard aggregates centrally |
 | Model | `claude-sonnet-4-6` for eval passes, `claude-opus-4-6` for final judging | Cost/quality tradeoff; Sonnet is sufficient for structured rubric scoring |
@@ -89,7 +90,8 @@ github-actions/
 │   └── workflows/
 │       └── evaluate-prs.yml               # Reusable workflow (workflow_call)
 ├── prompts/
-│   └── eval-system-prompt.md              # Full evaluation rubric + instructions
+│   ├── README.md                          # How to create new themes
+│   └── aws-bedrock.md                     # AWS Bedrock hackathon rubric (default)
 ├── schemas/
 │   └── eval-output.schema.json            # JSON schema for structured output
 ├── scripts/
@@ -115,7 +117,8 @@ github-actions/
 5. Per team repo: copy `templates/team-caller-workflow.yml` to `.github/workflows/eval.yml`
 6. Set up leaderboard endpoint (S3 bucket or API) to receive POST requests
 7. Calibrate: run against 3-4 sample PRs and verify scores match expectations
-8. Adjust `prompts/eval-system-prompt.md` rubric weights if needed
+8. Set `hackathon_theme` in team caller workflows (default: `aws-bedrock`)
+9. Adjust rubric weights in the prompt template if needed (see `prompts/README.md`)
 
 ## Development Commands
 

@@ -32,6 +32,10 @@ run-name: "Evaluate PRs — ${{ inputs.team_repo || github.repository }}"
         description: "Claude model to use for evaluation"
         type: string
         default: "claude-sonnet-4-6"
+      hackathon_theme:
+        description: "Evaluation prompt template (filename without .md in prompts/)"
+        type: string
+        default: "aws-bedrock"
     secrets:
       ANTHROPIC_API_KEY:
         required: true
@@ -68,6 +72,10 @@ run-name: "Evaluate PRs — ${{ inputs.team_repo || github.repository }}"
         description: "Claude model"
         type: string
         default: "claude-sonnet-4-6"
+      hackathon_theme:
+        description: "Evaluation prompt template (filename without .md in prompts/)"
+        type: string
+        default: "aws-bedrock"
 
 concurrency:
   group: hackathon-eval-${{ inputs.team_repo }}
@@ -190,6 +198,18 @@ jobs:
             echo "No README found." > team_readme.txt
           fi
 
+      - name: Validate prompt template
+        id: prompt
+        run: |
+          PROMPT_FILE="judge/prompts/${{ inputs.hackathon_theme }}.md"
+          if [ ! -f "$PROMPT_FILE" ]; then
+            echo "::error::Prompt template not found: $PROMPT_FILE"
+            echo "Available templates:"
+            ls judge/prompts/*.md
+            exit 1
+          fi
+          echo "prompt_file=$PROMPT_FILE" >> "$GITHUB_OUTPUT"
+
       - name: Run Claude evaluation
         id: evaluate
         uses: anthropics/claude-code-action@v1
@@ -214,7 +234,7 @@ jobs:
           claude_args: |
             --model ${{ inputs.model }}
             --max-turns 3
-            --append-system-prompt "$(cat judge/prompts/eval-system-prompt.md)"
+            --append-system-prompt "$(cat ${{ steps.prompt.outputs.prompt_file }})"
             --output-format json
             --allowedTools "Bash(gh pr view:*)" "Bash(gh pr diff:*)" "Bash(cat:*)" "Read" "Glob" "Grep"
 

@@ -40,6 +40,7 @@ jobs:
       team_size: ${{ fromJSON(vars.TEAM_SIZE || '1') }}
       target_branch: main
       max_parallel: 3
+      hackathon_theme: aws-bedrock  # Change per hackathon (see prompts/ in github-actions repo)
       # leaderboard_url: ${{ vars.LEADERBOARD_URL }}
       # model: claude-sonnet-4-6
     secrets: inherit

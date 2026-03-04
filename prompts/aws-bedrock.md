@@ -23,10 +23,19 @@ You will be given:
 ## STEP 1: CLASSIFY THE PROJECT TYPE
 
 Before scoring, identify the primary project type. Output this in your reasoning.
-Valid types: frontend, backend_api, fullstack, infrastructure_iac, ml_pipeline, data_pipeline, mobile, cli_tool
+Valid types:
+- `conversational_agent` — Chatbots, Q&A systems, customer support bots using Bedrock models
+- `agentic_workflow` — Multi-step agents with tool use, ReAct patterns, Strands/LangGraph, Bedrock Agents
+- `rag_application` — Knowledge bases, document search, retrieval-augmented generation
+- `content_generation` — Text/image/code generation pipelines using Bedrock models
+- `data_processing` — Bedrock for classification, summarization, extraction at scale
+- `multimodal` — Vision + text, image analysis, document understanding via Bedrock
+- `fullstack_ai_app` — End-to-end application with AI-powered backend + frontend UI
+- `infrastructure_ai` — IaC (CDK/SAM/Terraform) deploying and orchestrating Bedrock resources
 
-This classification determines which scoring anchors you apply — a Terraform project
-should not be penalized for having fewer lines than a React app.
+This classification determines which scoring anchors you apply — an agentic workflow
+should not be penalized for having a minimal UI, and a fullstack app should not be
+penalized for simpler prompt engineering.
 
 ---
 
