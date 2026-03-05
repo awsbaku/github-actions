@@ -151,26 +151,33 @@ jobs:
       fail-fast: false
 
     steps:
+      - name: Checkout team repo
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.team_repo }}
+          fetch-depth: 0
+
       - name: Checkout evaluation repo
         uses: actions/checkout@v4
         with:
           repository: ${{ github.repository_owner }}/github-actions
           path: judge
 
-      - name: Checkout team repo
-        uses: actions/checkout@v4
-        with:
-          repository: ${{ inputs.team_repo }}
-          path: team-repo
-          fetch-depth: 0
-
-      - name: Collect PR metadata
-        id: meta
+      - name: Collect PR metadata and build prompt
+        id: prepare
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ matrix.pr.number }}
           TEAM_REPO: ${{ inputs.team_repo }}
         run: |
+          # Validate prompt template
+          PROMPT_FILE="judge/prompts/${{ inputs.hackathon_theme }}.md"
+          if [ ! -f "$PROMPT_FILE" ]; then
+            echo "::error::Prompt template not found: $PROMPT_FILE"
+            ls judge/prompts/*.md 2>/dev/null || echo "No templates found"
+            exit 1
+          fi
+
           # Get commit messages for this PR
           COMMITS=$(gh pr view "$PR_NUMBER" \
             --repo "$TEAM_REPO" \
@@ -188,7 +195,7 @@ jobs:
             --json body \
             --jq '.body // "No description provided"')
 
-          # Write to files for the evaluation step
+          # Build pr_context.json
           cat > pr_context.json << JSONEOF
           {
             "team": "${{ inputs.team_name }}",
@@ -207,24 +214,36 @@ jobs:
 
           echo "$DIFF" > pr_diff.txt
 
-          # Check for README in team repo
-          if [ -f team-repo/README.md ]; then
-            head -c 10000 team-repo/README.md > team_readme.txt
+          # Get README
+          if [ -f README.md ]; then
+            head -c 10000 README.md > team_readme.txt
           else
             echo "No README found." > team_readme.txt
           fi
 
-      - name: Validate prompt template
-        id: prompt
-        run: |
-          PROMPT_FILE="judge/prompts/${{ inputs.hackathon_theme }}.md"
-          if [ ! -f "$PROMPT_FILE" ]; then
-            echo "::error::Prompt template not found: $PROMPT_FILE"
-            echo "Available templates:"
-            ls judge/prompts/*.md
-            exit 1
-          fi
-          echo "prompt_file=$PROMPT_FILE" >> "$GITHUB_OUTPUT"
+          # Build the full evaluation prompt with rubric included
+          {
+            echo "You are a hackathon judge. Evaluate the following PR."
+            echo ""
+            echo "## Evaluation Rubric"
+            cat "$PROMPT_FILE"
+            echo ""
+            echo "## PR Context"
+            cat pr_context.json
+            echo ""
+            echo "## Team README"
+            cat team_readme.txt
+            echo ""
+            echo "## PR Diff"
+            cat pr_diff.txt
+            echo ""
+            echo "## Instructions"
+            echo "Follow the evaluation rubric exactly. Output ONLY valid JSON matching the schema."
+            echo "Set timestamp to the current UTC time in ISO 8601 format."
+            echo 'Set evaluation_version to "v1.0".'
+          } > eval_prompt.txt
+
+          echo "Prompt built: $(wc -c < eval_prompt.txt) bytes"
 
       - name: Run Claude evaluation
         id: evaluate
@@ -233,25 +252,10 @@ jobs:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           prompt: |
-            You are a hackathon judge. Evaluate the following PR.
-
-            ## PR Context
-            $(cat pr_context.json)
-
-            ## Team README
-            $(cat team_readme.txt)
-
-            ## PR Diff
-            $(cat pr_diff.txt)
-
-            ## Instructions
-            Follow the evaluation rubric exactly. Output ONLY valid JSON matching the schema.
-            Set timestamp to the current UTC time in ISO 8601 format.
-            Set evaluation_version to "v1.0".
+            Read the file eval_prompt.txt in the current directory. It contains the full evaluation rubric, PR context, team README, and PR diff. Follow ALL instructions in that file exactly. Output ONLY valid JSON matching the evaluation schema.
           claude_args: |
             --model ${{ inputs.model }}
             --max-turns 3
-            --append-system-prompt "$(cat ${{ steps.prompt.outputs.prompt_file }})"
             --output-format json
             --allowedTools "Bash(gh pr view:*)" "Bash(gh pr diff:*)" "Bash(cat:*)" "Read" "Glob" "Grep"
 
