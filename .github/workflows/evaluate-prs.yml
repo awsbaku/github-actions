@@ -114,6 +114,23 @@ jobs:
           if [ "$PR_COUNT" -eq 0 ]; then
             echo "matrix=[]" >> "$GITHUB_OUTPUT"
             echo "pr_count=0" >> "$GITHUB_OUTPUT"
+          elif [ "$PR_COUNT" -gt 1 ]; then
+            echo "::warning::Team has $PR_COUNT open PRs — only the most recent will be evaluated"
+
+            # Take only the latest PR (first in gh pr list = most recent)
+            LATEST=$(echo "$MATRIX" | jq -c '[.[0]]')
+            LATEST_NUM=$(echo "$MATRIX" | jq '.[0].number')
+
+            # Post warning on skipped PRs
+            for PR_NUM in $(echo "$MATRIX" | jq '.[1:][].number'); do
+              gh pr comment "$PR_NUM" \
+                --repo "${{ inputs.team_repo }}" \
+                --body "> **Evaluation skipped:** Only 1 active PR is evaluated per cycle. PR #$LATEST_NUM was evaluated instead. Close extra PRs to avoid this." \
+                2>/dev/null || true
+            done
+
+            echo "matrix=$LATEST" >> "$GITHUB_OUTPUT"
+            echo "pr_count=1" >> "$GITHUB_OUTPUT"
           else
             # Escape for GH Actions output
             echo "matrix=$(echo "$MATRIX" | jq -c .)" >> "$GITHUB_OUTPUT"

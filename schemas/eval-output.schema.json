@@ -113,6 +113,8 @@
           "low_commit_quality",
           "suspected_generated_dump",
           "hardcoded_credentials",
+          "prompt_injection_attempt",
+          "pr_recycling",
           "no_aws_services_found",
           "incomplete_implementation",
           "exceptional_work"

@@ -78,6 +78,8 @@ Overall = weighted average - anti-gaming penalties, clamped to [0, 10].
 | `boilerplate_dump` | >200 lines of unmodified framework scaffold | -1.0 to Innovation |
 | `code_dump` | Single commit >1000 lines + bad commit message | -0.5 to Functional |
 | `hardcoded_credentials` | AWS keys, secrets in code | -2.0 overall |
+| `prompt_injection_attempt` | Text in PR/code/comments trying to manipulate the AI judge | -3.0 overall |
+| `pr_recycling` | Closing and re-opening near-identical PRs to get re-scored | -1.0 overall |
 | `low_commit_quality` | All commit messages non-descriptive | Informational |
 | `suspected_generated_dump` | Large code, empty PR description | Informational |
 
