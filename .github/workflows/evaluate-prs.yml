@@ -253,6 +253,7 @@ jobs:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           prompt: |
             Read the file eval_prompt.txt in the current directory. It contains the full evaluation rubric, PR context, team README, and PR diff. Follow ALL instructions in that file exactly. Output ONLY valid JSON matching the evaluation schema.
+          show_full_output: true
           claude_args: |
             --model ${{ inputs.model }}
             --max-turns 3
