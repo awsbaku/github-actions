@@ -30,25 +30,45 @@ Your repo has been pre-configured with these variables by the organizers:
 
 If these are missing or wrong, contact the organizers.
 
-### 2. Your Workflow
+### 2. Branching & Workflow
 
-All code should be submitted as **Pull Requests targeting `main`**. Do not push directly to `main`.
+Your repo comes with two branches:
 
-**Recommended workflow:**
+- **`main`** — Protected. Only updated via Pull Requests. This is what the AI judge evaluates.
+- **`development`** — Your working branch. Push here freely, collaborate, experiment.
+
+You can create as many feature branches as you want off `development`. Work however you like day-to-day. The AI judge **only looks at PRs targeting `main`**.
+
+**How to work:**
 
 ```bash
-# Create a feature branch
+# Day-to-day: work on feature branches off development
+git checkout development
 git checkout -b feature/my-awesome-feature
 
-# Write your code, commit with descriptive messages
+# Commit freely to your feature branch
 git add .
 git commit -m "Add Bedrock agent for document Q&A with streaming responses"
-
-# Push and open a PR
 git push origin feature/my-awesome-feature
+
+# Merge feature branches into development (via PR or direct push — your choice)
+git checkout development
+git merge feature/my-awesome-feature
+git push origin development
 ```
 
-Then open a Pull Request on GitHub targeting `main`.
+**When ready for evaluation:** open a single PR from `development` → `main`.
+
+```bash
+# On GitHub: create a Pull Request
+#   base: main  ←  compare: development
+```
+
+**Important rules for PRs targeting `main`:**
+- Only **one open PR** targeting `main` is allowed at a time. A second PR will be auto-closed.
+- Open your PR to `main` strategically — the AI evaluates it every 6 hours.
+- Keep pushing improvements to `development` and they flow into the same PR.
+- After evaluation and merge, open a new PR for the next batch of work.
 
 ### 3. Fill In Your README and CLAUDE.md
 
