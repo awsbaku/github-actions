@@ -30,9 +30,18 @@ def grade_label(score: float) -> str:
     return "Needs Work"
 
 
+DIMENSION_WEIGHTS = {
+    "functional_value": 0.30,
+    "aws_integration": 0.25,
+    "innovation": 0.20,
+    "code_quality": 0.15,
+    "documentation": 0.10,
+}
+
+
 def format_comment(result: dict) -> str:
-    scores = result["scores"]
-    anti = result["anti_gaming"]
+    scores = result.get("scores") or result.get("dimensions", {})
+    anti = result.get("anti_gaming", {"penalty_total": 0})
     flags = result.get("flags", [])
     overall = result["overall_score"]
 
@@ -48,8 +57,10 @@ def format_comment(result: dict) -> str:
 
     table_rows = ""
     for name, dim in rows:
-        weighted = dim["score"] * dim["weight"]
-        table_rows += f"| {name} | {dim['score']}/10 | {int(dim['weight']*100)}% | {weighted:.1f} |\n"
+        key = name.lower().replace(" ", "_").replace("/", "_")
+        weight = dim.get("weight", DIMENSION_WEIGHTS.get(key, 0))
+        weighted = dim["score"] * weight
+        table_rows += f"| {name} | {dim['score']}/10 | {int(weight*100)}% | {weighted:.1f} |\n"
 
     reasoning_sections = ""
     for name, dim in rows:
