@@ -18,19 +18,24 @@ echo "=== Provisioning $REPO ==="
 
 # 1. Create repo from template
 echo "[1/5] Creating repo from template..."
-gh repo create "$REPO" --template "$TEMPLATE" --private --confirm
+gh repo create "$REPO" --template "$TEMPLATE" --private
 
 # 2. Wait for GitHub to finish generating from template
 echo "[2/5] Waiting for repo to be ready..."
+MAIN_SHA=""
 for i in $(seq 1 30); do
-  IS_TEMPLATE_GEN=$(gh api "repos/$REPO" --jq '.is_template // false' 2>/dev/null || echo "waiting")
-  MAIN_SHA=$(gh api "repos/$REPO/git/ref/heads/main" --jq '.object.sha' 2>/dev/null || echo "")
-  if [ -n "$MAIN_SHA" ] && [ "$MAIN_SHA" != "" ]; then
+  # Check if template generation is complete
+  IS_GENERATING=$(gh api "repos/$REPO" --jq '.template_repository // empty' 2>/dev/null || echo "waiting")
+  SHA_CANDIDATE=$(gh api "repos/$REPO/git/ref/heads/main" --jq '.object.sha' 2>/dev/null || echo "")
+
+  # SHA must be exactly 40 hex chars
+  if echo "$SHA_CANDIDATE" | grep -qE '^[0-9a-f]{40}$'; then
+    MAIN_SHA="$SHA_CANDIDATE"
     echo "  Repo ready (main SHA: ${MAIN_SHA:0:7})"
     break
   fi
   echo "  Waiting... ($i/30)"
-  sleep 2
+  sleep 3
 done
 
 if [ -z "$MAIN_SHA" ]; then

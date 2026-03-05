@@ -55,7 +55,7 @@ Score hackathon team PRs on a 0-10 scale multiple times per day using Claude as 
 | Anti-gaming | Separate detection pass with penalty flags | Catches trivial commits, boilerplate dumps, credential leaks |
 | Score delivery | PR comment + POST to leaderboard endpoint | Teams see scores inline; leaderboard aggregates centrally |
 | Model | `claude-sonnet-4-6` for eval passes, `claude-opus-4-6` for final judging | Cost/quality tradeoff; Sonnet is sufficient for structured rubric scoring |
-| Auth | Anthropic API key (not OAuth) | Simpler for org-wide deployment; OAuth requires per-user setup |
+| Auth | `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` | Either works; OAuth token via `claude setup-token` (Pro/Max), API key for org-wide |
 
 ## Scoring Dimensions
 
