@@ -252,47 +252,54 @@ jobs:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           prompt: |
-            Read the file eval_prompt.txt in the current directory. It contains the full evaluation rubric, PR context, team README, and PR diff. Follow ALL instructions in that file exactly. Output ONLY valid JSON matching the evaluation schema.
-          show_full_output: true
+            Read the file eval_prompt.txt in the current directory. It contains the full evaluation rubric, PR context, team README, and PR diff.
+
+            Follow ALL instructions in that file exactly.
+
+            IMPORTANT: After generating the evaluation JSON, you MUST write it to a file called eval_result.json in the current directory using the Write tool or Bash. The file must contain ONLY the raw JSON object (no markdown fences).
           claude_args: |
             --model ${{ inputs.model }}
-            --max-turns 3
-            --allowedTools "Bash(gh pr view:*)" "Bash(gh pr diff:*)" "Bash(cat:*)" "Read" "Glob" "Grep"
+            --max-turns 5
+            --allowedTools "Bash(gh pr view:*)" "Bash(gh pr diff:*)" "Bash(cat:*)" "Bash(echo:*)" "Read" "Glob" "Grep" "Write"
+
+      - name: Verify eval result
+        id: verify
+        run: |
+          if [ -f eval_result.json ] && python3 -c "import json; json.load(open('eval_result.json'))" 2>/dev/null; then
+            echo "valid=true" >> "$GITHUB_OUTPUT"
+            echo "Eval result is valid JSON ($(wc -c < eval_result.json) bytes)"
+          else
+            echo "valid=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::eval_result.json missing or invalid"
+            cat eval_result.json 2>/dev/null || echo "File not found"
+          fi
 
       - name: Post score to PR
-        if: always() && steps.evaluate.outputs.result != ''
+        if: always() && steps.verify.outputs.valid == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TEAM_REPO: ${{ inputs.team_repo }}
           PR_NUMBER: ${{ matrix.pr.number }}
-          EVAL_RESULT: ${{ steps.evaluate.outputs.result }}
         run: |
           python3 judge/scripts/post_score.py \
-            --result "$EVAL_RESULT" \
+            --result-file eval_result.json \
             --repo "$TEAM_REPO" \
             --pr "$PR_NUMBER"
 
       - name: Upload to leaderboard
-        if: always() && steps.evaluate.outputs.result != '' && inputs.leaderboard_url != ''
+        if: always() && steps.verify.outputs.valid == 'true' && inputs.leaderboard_url != ''
         env:
           LEADERBOARD_URL: ${{ inputs.leaderboard_url }}
           LEADERBOARD_API_KEY: ${{ secrets.LEADERBOARD_API_KEY }}
-          EVAL_RESULT: ${{ steps.evaluate.outputs.result }}
         run: |
           curl -sf -X POST "$LEADERBOARD_URL" \
             -H "Content-Type: application/json" \
             -H "Authorization: Bearer $LEADERBOARD_API_KEY" \
-            -d "$EVAL_RESULT" \
+            -d @eval_result.json \
             || echo "Warning: Failed to POST to leaderboard (non-fatal)"
 
-      - name: Save eval result to file
-        if: always() && steps.evaluate.outputs.result != ''
-        env:
-          EVAL_RESULT: ${{ steps.evaluate.outputs.result }}
-        run: echo "$EVAL_RESULT" > eval_result.json
-
       - name: Save evaluation artifact
-        if: always() && steps.evaluate.outputs.result != ''
+        if: always() && steps.verify.outputs.valid == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: eval-pr-${{ matrix.pr.number }}
