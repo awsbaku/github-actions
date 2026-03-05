@@ -2,46 +2,51 @@
 
 ## Context
 
-The evaluation pipeline is complete and tested. Teams get scored on PRs via Claude Code Actions, with results posted as PR comments and saved as artifacts. The missing piece is a **live leaderboard** that aggregates scores across all teams and displays rankings in real-time.
+The evaluation pipeline is complete and tested. Teams get scored on PRs via Claude Code Actions, with results posted as PR comments and saved as artifacts. The missing piece is a **live leaderboard** that aggregates scores across all teams and displays rankings.
 
-## Architecture: S3 + Lambda + DynamoDB Hybrid
+## Architecture (Revised)
 
 ```
 GitHub Actions (eval workflow)
-    | POST eval_result.json
+    | POST eval_result.json (SigV4-signed via OIDC role)
     v
-Lambda Function URL (receiver)
-    |-- Validate JSON against schema
-    |-- Write raw eval --> DynamoDB (history table)
+Lambda Function URL (IAM auth)
+    |-- Validate JSON
+    |-- Write raw eval --> DynamoDB (history/audit)
+    |-- Query all teams' latest scores
     |-- Compute aggregated leaderboard.json
-    +-- Write leaderboard.json --> S3
-            |
-    CloudFront (30s TTL)
-            |
-    Frontend (polls every 30s)
+    +-- Write leaderboard.json --> existing S3 bucket (public-frontend)
+                                       |
+                              CloudFront (existing distribution)
+                                       |
+                              React app at /hackathon-leaderboard route
 ```
 
-### Why This Approach
+### Key Design Decisions
 
-| Option | Verdict |
-|--------|---------|
-| Pure S3 (JSON files) | Works but no query capability, race conditions on concurrent writes |
-| DynamoDB only | Overkill -- need API Gateway for reads, adds cost |
-| ElastiCache/Redis | Too expensive for this scale (~$15/month minimum) |
-| AppSync + DynamoDB | Real-time subscriptions unnecessary -- evals happen every 6h |
-| **S3 + Lambda + DynamoDB** | **Best fit -- simple, cheap, reuses existing infra** |
+| Decision | Choice | Rationale |
+|----------|--------|-----------|
+| Auth | Lambda Function URL with IAM auth | Reuses existing OIDC role, no API keys |
+| Storage | DynamoDB for history, S3 for rendered JSON | Full audit trail + zero-cost static serving |
+| Frontend | React route in existing `public-frontend` | No new CloudFront distribution needed |
+| S3 target | Same bucket as `public-frontend` | Lambda writes to `hackathon-leaderboard/` prefix |
+| CloudFront | No changes to `cloudfront-app` module | SPA error responses already serve index.html for all paths |
+
+### Why No CloudFront Changes Needed
+
+The existing `cloudfront-app` module has `spa_error_responses = true` which returns `index.html` for 403/404. When a browser hits `/hackathon-leaderboard`, CloudFront returns the React SPA, which handles routing client-side. The React app then fetches `leaderboard.json` from the same bucket via a known path.
 
 ### Cost Estimate
 
 Under **$0.10/month** for 20 teams x 4 evals/day x 30 days:
 - Lambda: ~2,400 invocations/month (free tier covers 1M)
 - DynamoDB: ~2,400 writes + reads (free tier covers 25 WCU/RCU)
-- S3: negligible (single JSON file overwritten)
+- S3: negligible (single JSON file overwritten in existing bucket)
 - CloudFront: already provisioned
 
 ## DynamoDB Table Design
 
-**Table: `hackathon-scores`**
+**Table: `<name_prefix>-hackathon-scores`**
 
 | Key | Type | Purpose |
 |-----|------|---------|
@@ -60,23 +65,22 @@ Under **$0.10/month** for 20 teams x 4 evals/day x 30 days:
 
 ## Lambda Function
 
-**Runtime:** Python 3.12
-**Trigger:** Function URL (no API Gateway needed)
-**IAM:** DynamoDB read/write + S3 PutObject
+**Runtime:** Python 3.13
+**Trigger:** Function URL (authorization_type = AWS_IAM)
+**IAM:** DynamoDB read/write + S3 PutObject on existing bucket
 
 ### Logic
 
-1. Receive POST with `eval_result.json` payload
-2. Validate against `schemas/eval-output.schema.json`
+1. Receive POST with `eval_result.json` payload (SigV4-signed)
+2. Validate JSON structure
 3. Write raw eval to DynamoDB (`hackathon-scores` table)
 4. Query all teams' latest scores from DynamoDB
 5. Apply aggregation rules (diminishing returns for PR count, time decay)
 6. Generate `leaderboard.json` with rankings
-7. Upload to S3 bucket (served via CloudFront)
+7. Upload to S3 bucket at `hackathon-leaderboard/leaderboard.json`
 
 ### Aggregation Rules
 
-From CLAUDE.md:
 - PRs 1-5: full credit (1.0x)
 - PRs 6-10: 80% credit (0.8x)
 - PRs 11+: 50% credit (0.5x)
@@ -119,6 +123,53 @@ Time decay:
 }
 ```
 
+## Terraform Module: `modules/hackathon-leaderboard`
+
+Located in `awsbaku/terraform-infrastructure` repo, following existing patterns.
+
+### Resources
+
+| Resource | Purpose |
+|----------|---------|
+| `aws_dynamodb_table.scores` | Store eval history |
+| `aws_lambda_function.receiver` | Process incoming evals |
+| `aws_lambda_function_url.receiver` | IAM-authed HTTP endpoint |
+| `aws_iam_role.lambda` | Lambda execution role (DynamoDB + S3) |
+| `aws_cloudwatch_log_group.lambda` | Lambda logs with retention |
+
+### Module Interface
+
+```hcl
+# Inputs
+variable "name_prefix"      # e.g. "awsbaku-infrastructure-org"
+variable "s3_bucket_name"    # existing public-frontend bucket
+variable "s3_bucket_arn"     # for IAM policy
+variable "s3_leaderboard_prefix" # default: "hackathon-leaderboard"
+variable "hackathon_start"   # ISO 8601
+variable "hackathon_end"     # ISO 8601
+
+# Outputs
+output "function_url"        # Lambda Function URL (for GHA workflow)
+output "dynamodb_table_name" # For debugging/queries
+output "lambda_role_arn"     # For OIDC policy if needed
+```
+
+### Environment Wiring (main.tf)
+
+```hcl
+module "hackathon_leaderboard" {
+  source = "../../modules/hackathon-leaderboard"
+
+  name_prefix    = local.name_prefix
+  s3_bucket_name = module.cloudfront_app_public_frontend.s3_bucket_name
+  s3_bucket_arn  = module.cloudfront_app_public_frontend.s3_bucket_arn
+}
+```
+
+### GHA OIDC Role Update
+
+The existing `gha_oidc` role needs `lambda:InvokeFunctionUrl` permission so GitHub Actions can POST to the Lambda. Add the leaderboard Lambda ARN to the OIDC module.
+
 ## Workflow Integration
 
 Add a step to `evaluate-prs.yml` after score posting:
@@ -130,42 +181,26 @@ Add a step to `evaluate-prs.yml` after score posting:
     LEADERBOARD_URL: ${{ vars.LEADERBOARD_URL }}
   run: |
     if [ -n "$LEADERBOARD_URL" ]; then
-      curl -s -X POST "$LEADERBOARD_URL" \
-        -H "Content-Type: application/json" \
-        -d @eval_result.json
+      aws lambda invoke-function-url \
+        --url "$LEADERBOARD_URL" \
+        --http-method POST \
+        --body fileb://eval_result.json
     fi
 ```
 
-## Terraform Resources
-
-All infrastructure in `terraform/modules/leaderboard/`:
-
-| Resource | Purpose |
-|----------|---------|
-| `aws_dynamodb_table.scores` | Store eval history |
-| `aws_lambda_function.receiver` | Process incoming evals |
-| `aws_lambda_function_url.receiver` | Public HTTP endpoint |
-| `aws_iam_role.lambda` | Lambda execution role |
-| `aws_s3_object.leaderboard` | Initial empty leaderboard.json |
-| `aws_cloudfront_*` | Reuse existing distribution (add origin) |
+Uses `aws lambda invoke-function-url` which automatically signs with the assumed OIDC role credentials.
 
 ## Implementation Steps
 
-1. **Terraform module** -- Lambda + DynamoDB table + S3 bucket policy + Function URL
-2. **Lambda function** (Python) -- receives POST, validates, writes DynamoDB, generates `leaderboard.json`, uploads to S3
-3. **Update evaluate-prs.yml** -- add `curl` step after score posting to POST eval JSON to Lambda URL
-4. **Set org variable** -- `LEADERBOARD_URL` pointing to Lambda Function URL
-5. **Frontend** -- simple static page reading `leaderboard.json` from CloudFront
-6. **Test** -- trigger eval on test repos, verify leaderboard updates
-
-## Frontend (Minimal)
-
-Static HTML + vanilla JS (or add to existing `public-frontend`):
-- Fetch `leaderboard.json` from CloudFront every 30 seconds
-- Render sortable table with team rankings
-- Show dimension breakdown on row expand
-- Highlight score changes with animations
-- Mobile-responsive
+1. **Terraform module** (`modules/hackathon-leaderboard`) -- Lambda + DynamoDB + Function URL + IAM
+2. **Lambda function** (Python, bundled in module) -- receives POST, validates, writes DynamoDB, generates leaderboard.json, uploads to S3
+3. **Wire in environment** (`environments/infrastructure-org/main.tf`) -- instantiate module with existing bucket outputs
+4. **Update OIDC role** -- add `lambda:InvokeFunctionUrl` for the new Lambda
+5. **terraform plan** -- review and apply
+6. **Update evaluate-prs.yml** -- add leaderboard submission step
+7. **Set org variable** -- `LEADERBOARD_URL` pointing to Lambda Function URL
+8. **Frontend** -- add `/hackathon-leaderboard` route in React app
+9. **Test** -- trigger eval on test repos, verify leaderboard updates
 
 ## Status
 
@@ -175,6 +210,8 @@ Static HTML + vanilla JS (or add to existing `public-frontend`):
 - [x] All changes synced to template and test repos
 - [ ] Terraform module for leaderboard infra
 - [ ] Lambda function implementation
-- [ ] Workflow integration (curl step)
-- [ ] Frontend leaderboard page
+- [ ] Wire module in environment + terraform apply
+- [ ] Update OIDC role for Lambda invoke
+- [ ] Workflow integration (aws lambda invoke-function-url step)
+- [ ] Frontend leaderboard route in React app
 - [ ] End-to-end leaderboard test

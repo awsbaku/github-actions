@@ -24,10 +24,6 @@ run-name: "Evaluate PRs — ${{ inputs.team_repo || github.repository }}"
         description: "Max concurrent PR evaluations (respect API rate limits)"
         type: number
         default: 3
-      leaderboard_url:
-        description: "URL to POST evaluation results to (optional)"
-        type: string
-        default: ""
       model:
         description: "Claude model to use for evaluation"
         type: string
@@ -41,7 +37,7 @@ run-name: "Evaluate PRs — ${{ inputs.team_repo || github.repository }}"
         required: false
       CLAUDE_CODE_OAUTH_TOKEN:
         required: false
-      LEADERBOARD_API_KEY:
+      AWS_ROLE_ARN:
         required: false
 
   workflow_dispatch:
@@ -66,10 +62,6 @@ run-name: "Evaluate PRs — ${{ inputs.team_repo || github.repository }}"
         description: "Max concurrent evaluations"
         type: number
         default: 3
-      leaderboard_url:
-        description: "Leaderboard POST URL"
-        type: string
-        default: ""
       model:
         description: "Claude model"
         type: string
@@ -286,17 +278,28 @@ jobs:
             --repo "$TEAM_REPO" \
             --pr "$PR_NUMBER"
 
-      - name: Upload to leaderboard
-        if: always() && steps.verify.outputs.valid == 'true' && inputs.leaderboard_url != ''
+      - name: Configure AWS credentials
+        if: always() && steps.verify.outputs.valid == 'true' && secrets.AWS_ROLE_ARN != ''
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: eu-central-1
+
+      - name: Submit score to leaderboard
+        if: always() && steps.verify.outputs.valid == 'true' && secrets.AWS_ROLE_ARN != ''
         env:
-          LEADERBOARD_URL: ${{ inputs.leaderboard_url }}
-          LEADERBOARD_API_KEY: ${{ secrets.LEADERBOARD_API_KEY }}
+          LEADERBOARD_URL: ${{ vars.LEADERBOARD_URL }}
         run: |
-          curl -sf -X POST "$LEADERBOARD_URL" \
-            -H "Content-Type: application/json" \
-            -H "Authorization: Bearer $LEADERBOARD_API_KEY" \
-            -d @eval_result.json \
-            || echo "Warning: Failed to POST to leaderboard (non-fatal)"
+          if [ -z "$LEADERBOARD_URL" ]; then
+            echo "LEADERBOARD_URL not set — skipping"
+            exit 0
+          fi
+          aws lambda invoke-function-url \
+            --function-url "$LEADERBOARD_URL" \
+            --http-method POST \
+            --body fileb://eval_result.json \
+            /dev/stdout \
+            || echo "::warning::Failed to submit to leaderboard (non-fatal)"
 
       - name: Save evaluation artifact
         if: always() && steps.verify.outputs.valid == 'true'
