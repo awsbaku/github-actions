@@ -281,6 +281,12 @@ jobs:
             -d "$EVAL_RESULT" \
             || echo "Warning: Failed to POST to leaderboard (non-fatal)"
 
+      - name: Save eval result to file
+        if: always() && steps.evaluate.outputs.result != ''
+        env:
+          EVAL_RESULT: ${{ steps.evaluate.outputs.result }}
+        run: echo "$EVAL_RESULT" > eval_result.json
+
       - name: Save evaluation artifact
         if: always() && steps.evaluate.outputs.result != ''
         uses: actions/upload-artifact@v4
@@ -288,4 +294,5 @@ jobs:
           name: eval-pr-${{ matrix.pr.number }}
           path: |
             pr_context.json
+            eval_result.json
           retention-days: 30
