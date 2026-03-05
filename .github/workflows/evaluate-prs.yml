@@ -257,7 +257,6 @@ jobs:
           claude_args: |
             --model ${{ inputs.model }}
             --max-turns 3
-            --output-format json
             --allowedTools "Bash(gh pr view:*)" "Bash(gh pr diff:*)" "Bash(cat:*)" "Read" "Glob" "Grep"
 
       - name: Post score to PR
