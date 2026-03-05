@@ -259,7 +259,7 @@ jobs:
             IMPORTANT: After generating the evaluation JSON, you MUST write it to a file called eval_result.json in the current directory using the Write tool or Bash. The file must contain ONLY the raw JSON object (no markdown fences).
           claude_args: |
             --model ${{ inputs.model }}
-            --max-turns 5
+            --max-turns 10
             --allowedTools "Bash(gh pr view:*)" "Bash(gh pr diff:*)" "Bash(cat:*)" "Bash(echo:*)" "Read" "Glob" "Grep" "Write"
 
       - name: Verify eval result
