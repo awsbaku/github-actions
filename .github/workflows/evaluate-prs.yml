@@ -279,14 +279,18 @@ jobs:
             --pr "$PR_NUMBER"
 
       - name: Configure AWS credentials
-        if: always() && steps.verify.outputs.valid == 'true' && secrets.AWS_ROLE_ARN != ''
+        if: always() && steps.verify.outputs.valid == 'true' && env.HAS_AWS_ROLE == 'true'
         uses: aws-actions/configure-aws-credentials@v4
+        env:
+          HAS_AWS_ROLE: ${{ secrets.AWS_ROLE_ARN != '' }}
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: eu-central-1
 
       - name: Submit score to leaderboard
-        if: always() && steps.verify.outputs.valid == 'true' && secrets.AWS_ROLE_ARN != ''
+        if: always() && steps.verify.outputs.valid == 'true' && env.HAS_AWS_ROLE == 'true'
+        env:
+          HAS_AWS_ROLE: ${{ secrets.AWS_ROLE_ARN != '' }}
         env:
           LEADERBOARD_URL: ${{ vars.LEADERBOARD_URL }}
         run: |
