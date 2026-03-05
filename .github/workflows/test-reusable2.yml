@@ -34,33 +34,6 @@ name: Test Reusable 2
       LEADERBOARD_API_KEY:
         required: false
 
-  workflow_dispatch:
-    inputs:
-      team_repo:
-        type: string
-        required: true
-      team_name:
-        type: string
-        required: true
-      team_size:
-        type: number
-        default: 1
-      target_branch:
-        type: string
-        default: "main"
-      max_parallel:
-        type: number
-        default: 3
-      leaderboard_url:
-        type: string
-        default: ""
-      model:
-        type: string
-        default: "claude-sonnet-4-6"
-      hackathon_theme:
-        type: string
-        default: "aws-bedrock"
-
 concurrency:
   group: test-eval-${{ inputs.team_repo }}
   cancel-in-progress: false
@@ -87,10 +60,6 @@ jobs:
     needs: discover
     if: needs.discover.outputs.pr_count != '0'
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      pull-requests: write
-      id-token: write
     strategy:
       matrix:
         pr: ${{ fromJSON(needs.discover.outputs.matrix) }}
