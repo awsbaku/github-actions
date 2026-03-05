@@ -1,0 +1,43 @@
+name: Test Reusable 2
+"on":
+  workflow_call:
+    inputs:
+      team_repo:
+        type: string
+        required: true
+      team_name:
+        type: string
+        required: true
+      team_size:
+        type: number
+        default: 1
+      target_branch:
+        type: string
+        default: "main"
+      max_parallel:
+        type: number
+        default: 3
+      hackathon_theme:
+        type: string
+        default: "aws-bedrock"
+    secrets:
+      ANTHROPIC_API_KEY:
+        required: false
+      CLAUDE_CODE_OAUTH_TOKEN:
+        required: false
+      LEADERBOARD_API_KEY:
+        required: false
+
+concurrency:
+  group: test-eval-${{ inputs.team_repo }}
+  cancel-in-progress: false
+
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          echo "team_repo=${{ inputs.team_repo }}"
+          echo "team_name=${{ inputs.team_name }}"
+          echo "team_size=${{ inputs.team_size }}"
+          echo "hackathon_theme=${{ inputs.hackathon_theme }}"
