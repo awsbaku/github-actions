@@ -22,7 +22,7 @@ jobs:
         run: |
           # Skip check for org admins
           ADMINS='${{ vars.EVAL_ADMINS }}'
-          if echo "${ADMINS:-[]}" | jq -e --arg u "$PR_AUTHOR" 'index($u) != null' >/dev/null 2>&1; then
+          if echo "${ADMINS:-[]}" | jq -e --arg u "$PR_AUTHOR" 'any(. == $u)' >/dev/null 2>&1; then
             echo "PR author $PR_AUTHOR is an admin — skipping protection check"
             exit 0
           fi
