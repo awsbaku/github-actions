@@ -60,9 +60,6 @@ jobs:
     needs: discover
     if: needs.discover.outputs.pr_count != '0'
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      pull-requests: write
     strategy:
       matrix:
         pr: ${{ fromJSON(needs.discover.outputs.matrix) }}
