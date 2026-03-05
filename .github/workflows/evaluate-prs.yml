@@ -144,10 +144,6 @@ jobs:
     needs: discover-prs
     if: needs.discover-prs.outputs.pr_count != '0'
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      pull-requests: write
-      id-token: write
     strategy:
       matrix:
         pr: ${{ fromJSON(needs.discover-prs.outputs.matrix) }}
