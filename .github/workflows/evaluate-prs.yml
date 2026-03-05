@@ -154,6 +154,7 @@ jobs:
       - name: Checkout evaluation repo
         uses: actions/checkout@v4
         with:
+          repository: ${{ github.repository_owner }}/github-actions
           path: judge
 
       - name: Checkout team repo
