@@ -1,0 +1,67 @@
+name: Protected Files Check
+
+"on":
+  pull_request:
+    types: [opened, synchronize]
+    branches: [main]
+
+permissions:
+  pull-requests: write
+  contents: read
+
+jobs:
+  check:
+    name: Block protected file changes
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check for modified protected files
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+        run: |
+          # Skip check for org admins
+          ADMINS='${{ vars.EVAL_ADMINS }}'
+          if echo "${ADMINS:-[]}" | jq -e --arg u "$PR_AUTHOR" 'index($u) != null' >/dev/null 2>&1; then
+            echo "PR author $PR_AUTHOR is an admin — skipping protection check"
+            exit 0
+          fi
+
+          # Get list of files changed in this PR
+          CHANGED=$(gh pr diff "$PR_NUMBER" --repo "${{ github.repository }}" --name-only)
+
+          # Check for protected paths
+          PROTECTED=""
+          while IFS= read -r file; do
+            case "$file" in
+              .github/workflows/*) PROTECTED="$PROTECTED\n- \`$file\`" ;;
+            esac
+          done <<< "$CHANGED"
+
+          if [ -z "$PROTECTED" ]; then
+            echo "No protected files modified"
+            exit 0
+          fi
+
+          echo "::error::PR modifies protected workflow files"
+
+          gh pr comment "$PR_NUMBER" \
+            --repo "${{ github.repository }}" \
+            --body "$(cat <<MSG
+          ## Protected Files Modified
+
+          @${PR_AUTHOR} — this PR modifies **protected workflow files** that are managed by organizers:
+
+          $(echo -e "$PROTECTED")
+
+          **What to do:**
+          1. Create a new branch from \`development\`
+          2. Cherry-pick or redo your changes **without** touching \`.github/workflows/\`
+          3. Open a new PR targeting \`main\`
+
+          If you believe this is a mistake, contact the organizers.
+          MSG
+          )"
+
+          gh pr close "$PR_NUMBER" --repo "${{ github.repository }}"
+          exit 1

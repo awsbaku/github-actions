@@ -8,8 +8,7 @@
     "pr_number",
     "timestamp",
     "evaluation_version",
-    "commit_metadata",
-    "scores",
+    "dimensions",
     "anti_gaming",
     "overall_score",
     "flags",
@@ -22,7 +21,7 @@
     },
     "repo": {
       "type": "string",
-      "description": "Full GitHub repo slug, e.g. 'awsbaku-hackathon/team-alpha'"
+      "description": "Full GitHub repo slug, e.g. 'awsbaku/team-alpha'"
     },
     "pr_number": {
       "type": "integer"
@@ -39,22 +38,7 @@
       "type": "string",
       "description": "Project classification defined by the hackathon theme prompt (e.g. 'agentic_workflow', 'rag_application')"
     },
-    "commit_metadata": {
-      "type": "object",
-      "required": ["commit_count", "total_lines_added", "total_lines_removed", "files_changed"],
-      "properties": {
-        "commit_count": { "type": "integer" },
-        "total_lines_added": { "type": "integer" },
-        "total_lines_removed": { "type": "integer" },
-        "files_changed": { "type": "integer" },
-        "largest_single_commit_lines": { "type": "integer" },
-        "commit_messages": {
-          "type": "array",
-          "items": { "type": "string" }
-        }
-      }
-    },
-    "scores": {
+    "dimensions": {
       "type": "object",
       "required": [
         "functional_value",
@@ -64,23 +48,23 @@
         "documentation"
       ],
       "properties": {
-        "functional_value": { "$ref": "#/$defs/dimension_score_030" },
-        "aws_integration": { "$ref": "#/$defs/dimension_score_025" },
-        "innovation": { "$ref": "#/$defs/dimension_score_020" },
-        "code_quality": { "$ref": "#/$defs/dimension_score_015" },
-        "documentation": { "$ref": "#/$defs/dimension_score_010" }
+        "functional_value": { "$ref": "#/$defs/dimension_score" },
+        "aws_integration": { "$ref": "#/$defs/dimension_score" },
+        "innovation": { "$ref": "#/$defs/dimension_score" },
+        "code_quality": { "$ref": "#/$defs/dimension_score" },
+        "documentation": { "$ref": "#/$defs/dimension_score" }
       }
     },
     "anti_gaming": {
       "type": "object",
-      "required": ["penalty_total", "checks"],
+      "required": ["penalty_total"],
       "properties": {
         "penalty_total": {
           "type": "number",
           "minimum": 0,
           "description": "Total score penalty applied (0.0 = no penalty)"
         },
-        "checks": {
+        "checks_triggered": {
           "type": "array",
           "items": {
             "type": "object",
@@ -91,7 +75,8 @@
               "detail": { "type": "string" },
               "penalty_applied": { "type": "number" }
             }
-          }
+          },
+          "description": "List of anti-gaming checks and their results"
         }
       }
     },
@@ -144,16 +129,15 @@
     }
   },
   "$defs": {
-    "dimension_score_base": {
+    "dimension_score": {
       "type": "object",
-      "required": ["score", "weight", "reasoning", "evidence"],
+      "required": ["score", "reasoning", "evidence"],
       "properties": {
         "score": {
           "type": "integer",
           "minimum": 0,
           "maximum": 10
         },
-        "weight": { "type": "number" },
         "reasoning": {
           "type": "string",
           "description": "1-3 sentence justification"
@@ -164,61 +148,6 @@
           "description": "Specific file:observation references"
         }
       }
-    },
-    "dimension_score_030": {
-      "allOf": [
-        { "$ref": "#/$defs/dimension_score_base" },
-        { "properties": { "weight": { "const": 0.30 } } }
-      ]
-    },
-    "dimension_score_025": {
-      "allOf": [
-        { "$ref": "#/$defs/dimension_score_base" },
-        {
-          "properties": {
-            "weight": { "const": 0.25 },
-            "services_detected": {
-              "type": "array",
-              "items": { "type": "string" },
-              "description": "AWS services found, e.g. ['bedrock-runtime', 's3']"
-            }
-          }
-        }
-      ]
-    },
-    "dimension_score_020": {
-      "allOf": [
-        { "$ref": "#/$defs/dimension_score_base" },
-        {
-          "properties": {
-            "weight": { "const": 0.20 },
-            "notable_approaches": {
-              "type": "array",
-              "items": { "type": "string" }
-            }
-          }
-        }
-      ]
-    },
-    "dimension_score_015": {
-      "allOf": [
-        { "$ref": "#/$defs/dimension_score_base" },
-        {
-          "properties": {
-            "weight": { "const": 0.15 },
-            "issues_found": {
-              "type": "array",
-              "items": { "type": "string" }
-            }
-          }
-        }
-      ]
-    },
-    "dimension_score_010": {
-      "allOf": [
-        { "$ref": "#/$defs/dimension_score_base" },
-        { "properties": { "weight": { "const": 0.10 } } }
-      ]
     }
   }
 }

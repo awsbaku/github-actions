@@ -3,14 +3,15 @@
 # Required org-level secrets:
 #   ANTHROPIC_API_KEY — Claude API key for evaluations
 #
+# Required org-level variables:
+#   EVAL_ADMINS — JSON array of GitHub usernames allowed to trigger manual evals
+#
 # Required repo-level variables:
 #   TEAM_NAME — Your team's display name (e.g., "Team Alpha")
 #   TEAM_SIZE — Number of team members (e.g., 3)
 #
-# Optional repo-level variables:
-#   EVAL_SCHEDULE — Custom cron schedule (default: every 6 hours)
-#
-# The evaluation runs on a schedule and can also be triggered manually.
+# The evaluation runs on a schedule, on PR events, and can be triggered
+# manually by organizers listed in EVAL_ADMINS.
 
 name: Hackathon Evaluation
 run-name: "Hackathon Score — ${{ github.repository }}"
@@ -21,10 +22,10 @@ run-name: "Hackathon Score — ${{ github.repository }}"
   schedule:
     - cron: "0 */6 * * *"
 
-  # Manual trigger for on-demand evaluation
+  # Manual trigger — restricted to EVAL_ADMINS in the job condition
   workflow_dispatch:
 
-  # Also evaluate when PRs are opened or updated (optional — remove if too noisy)
+  # Evaluate when PRs are opened or updated
   pull_request:
     types: [opened, synchronize, ready_for_review]
     branches: [main]
@@ -36,8 +37,10 @@ permissions:
 
 jobs:
   evaluate:
-    # Skip draft PRs on pull_request trigger
-    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    if: >-
+      (github.event_name == 'schedule') ||
+      (github.event_name == 'pull_request' && github.event.pull_request.draft == false) ||
+      (github.event_name == 'workflow_dispatch' && contains(fromJSON(vars.EVAL_ADMINS || '[]'), github.actor))
     uses: awsbaku/github-actions/.github/workflows/evaluate-prs.yml@main
     with:
       team_repo: ${{ github.repository }}
@@ -45,7 +48,5 @@ jobs:
       team_size: ${{ fromJSON(vars.TEAM_SIZE || '1') }}
       target_branch: main
       max_parallel: 3
-      hackathon_theme: aws-bedrock  # Change per hackathon (see prompts/ in github-actions repo)
-      # leaderboard_url: ${{ vars.LEADERBOARD_URL }}
-      # model: claude-sonnet-4-6
+      hackathon_theme: aws-bedrock
     secrets: inherit
