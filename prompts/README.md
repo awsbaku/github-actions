@@ -32,6 +32,20 @@ Each `.md` file in this directory is a self-contained evaluation rubric for a sp
 
 5. Use the theme by setting `hackathon_theme: your-theme` in the team caller workflow
 
+## Syncing Dimensions Across the Stack
+
+When you change scoring dimensions (names, keys, or weights), you must update **3 places**:
+
+| File | What to change |
+|------|----------------|
+| `prompts/<theme>.md` | Dimension definitions, weights, and scoring anchors |
+| `public-frontend/src/components/sections/leaderboard-table.tsx` | `dimensions` array — update `key`, `label`, and `weight` to match |
+| `schemas/eval-output.schema.json` | Update dimension key names in the JSON schema |
+
+The frontend labels and weights are **not dynamic** — they are hardcoded to match the prompt. If you add or rename a dimension in the prompt but don't update the frontend, the leaderboard will show wrong labels or missing scores.
+
+> **Future improvement:** Include dimension metadata in `leaderboard.json` from the Lambda so the frontend can render them dynamically without code changes.
+
 ## Naming Convention
 
 - Lowercase, hyphen-separated: `aws-bedrock`, `serverless`, `full-stack`
