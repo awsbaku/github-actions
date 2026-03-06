@@ -1,217 +1,248 @@
-# Plan: Live Hackathon Leaderboard
+# Plan: Hackathon Leaderboard Frontend
 
 ## Context
 
-The evaluation pipeline is complete and tested. Teams get scored on PRs via Claude Code Actions, with results posted as PR comments and saved as artifacts. The missing piece is a **live leaderboard** that aggregates scores across all teams and displays rankings.
+Backend is complete and deployed:
+- Lambda Function URL: `https://d4a7fri5bf5sf6m6u433raysvi0nwhxb.lambda-url.eu-central-1.on.aws/`
+- DynamoDB table: `awsbaku-infrastructure-org-hackathon-scores`
+- Lambda writes `leaderboard.json` to S3 at `hackathon-leaderboard/leaderboard.json`
+- CloudFront serves the existing React SPA with SPA fallback (403/404 -> index.html)
+- OIDC role updated with `lambda:InvokeFunctionUrl`
+- `evaluate-prs.yml` updated with leaderboard submission step
 
-## Architecture (Revised)
+**This plan covers the frontend implementation only** -- adding a `/hackathon-leaderboard` route to the existing `awsbaku/public-frontend` React app.
 
+## Existing Stack (public-frontend)
+
+| Tool | Version | Purpose |
+|------|---------|---------|
+| React | 19.2.0 | UI framework |
+| Vite | 7.3.1 | Bundler |
+| TypeScript | ~5.9.3 | Type safety (strict mode) |
+| Tailwind CSS | 4.2.1 | Styling (dark theme, CSS variables) |
+| TanStack Query | 5.90.21 | Data fetching + caching |
+| Framer Motion | 12.34.3 | Animations |
+| react-router-dom | 7.13.1 | Client-side routing |
+| lucide-react | 0.575.0 | Icons |
+| Biome | 1.9.4 | Lint + format |
+
+### Patterns to Follow
+
+- **File naming**: kebab-case (`leaderboard-page.tsx`)
+- **Components**: PascalCase exports, `"use client"` directive
+- **Styling**: Tailwind utility classes, `cn()` from `@/lib/utils`
+- **Animation**: `useScrollAnimation()` hook + `fadeInUp`/`staggerContainer` variants from `@/lib/animations`
+- **Transitions**: `transitions.expo` (0.6s cinematic) for reveals
+- **Data fetching**: TanStack Query with `useQuery()`
+- **Pages**: `src/pages/` directory, lazy-loaded in `App.tsx`
+- **Sections**: `src/components/sections/` for page sections
+- **Magic UI**: Reuse `NumberTicker`, `BorderBeam`, `ShimmerButton` where appropriate
+- **Theme**: Dark background (#161e2d), purple accent (#8351e5), Ember fonts
+
+## Data Source
+
+The Lambda writes `leaderboard.json` to S3 at:
 ```
-GitHub Actions (eval workflow)
-    | POST eval_result.json (SigV4-signed via OIDC role)
-    v
-Lambda Function URL (IAM auth)
-    |-- Validate JSON
-    |-- Write raw eval --> DynamoDB (history/audit)
-    |-- Query all teams' latest scores
-    |-- Compute aggregated leaderboard.json
-    +-- Write leaderboard.json --> existing S3 bucket (public-frontend)
-                                       |
-                              CloudFront (existing distribution)
-                                       |
-                              React app at /hackathon-leaderboard route
+s3://awsbaku-infrastructure-org-public-frontend/hackathon-leaderboard/leaderboard.json
 ```
 
-### Key Design Decisions
+Served via CloudFront at:
+```
+https://awsbaku.tech/hackathon-leaderboard/leaderboard.json
+```
 
-| Decision | Choice | Rationale |
-|----------|--------|-----------|
-| Auth | Lambda Function URL with IAM auth | Reuses existing OIDC role, no API keys |
-| Storage | DynamoDB for history, S3 for rendered JSON | Full audit trail + zero-cost static serving |
-| Frontend | React route in existing `public-frontend` | No new CloudFront distribution needed |
-| S3 target | Same bucket as `public-frontend` | Lambda writes to `hackathon-leaderboard/` prefix |
-| CloudFront | No changes to `cloudfront-app` module | SPA error responses already serve index.html for all paths |
+### leaderboard.json Shape
 
-### Why No CloudFront Changes Needed
+```typescript
+interface LeaderboardData {
+  updated_at: string;           // ISO 8601
+  hackathon: {
+    start: string;              // ISO 8601
+    end: string;                // ISO 8601
+  };
+  rankings: TeamRanking[];
+}
 
-The existing `cloudfront-app` module has `spa_error_responses = true` which returns `index.html` for 403/404. When a browser hits `/hackathon-leaderboard`, CloudFront returns the React SPA, which handles routing client-side. The React app then fetches `leaderboard.json` from the same bucket via a known path.
-
-### Cost Estimate
-
-Under **$0.10/month** for 20 teams x 4 evals/day x 30 days:
-- Lambda: ~2,400 invocations/month (free tier covers 1M)
-- DynamoDB: ~2,400 writes + reads (free tier covers 25 WCU/RCU)
-- S3: negligible (single JSON file overwritten in existing bucket)
-- CloudFront: already provisioned
-
-## DynamoDB Table Design
-
-**Table: `<name_prefix>-hackathon-scores`**
-
-| Key | Type | Purpose |
-|-----|------|---------|
-| PK: `TEAM#<slug>` | String | Partition key |
-| SK: `PR#<number>#<timestamp>` | String | Sort key -- allows multiple evals per PR |
-| `overall_score` | Number | For GSI queries |
-| `dimensions` | Map | Full dimension scores |
-| `eval_json` | String | Raw eval result |
-| `team_name` | String | Display name |
-| `pr_number` | Number | PR number |
-| `timestamp` | String | ISO 8601 eval timestamp |
-
-**GSI: `leaderboard-index`**
-- PK: `HACKATHON` (constant string), SK: `overall_score` (descending)
-- Enables single-query leaderboard fetch
-
-## Lambda Function
-
-**Runtime:** Python 3.13
-**Trigger:** Function URL (authorization_type = AWS_IAM)
-**IAM:** DynamoDB read/write + S3 PutObject on existing bucket
-
-### Logic
-
-1. Receive POST with `eval_result.json` payload (SigV4-signed)
-2. Validate JSON structure
-3. Write raw eval to DynamoDB (`hackathon-scores` table)
-4. Query all teams' latest scores from DynamoDB
-5. Apply aggregation rules (diminishing returns for PR count, time decay)
-6. Generate `leaderboard.json` with rankings
-7. Upload to S3 bucket at `hackathon-leaderboard/leaderboard.json`
-
-### Aggregation Rules
-
-- PRs 1-5: full credit (1.0x)
-- PRs 6-10: 80% credit (0.8x)
-- PRs 11+: 50% credit (0.5x)
-
-Time decay:
-- First 50% of hackathon: 1.0x
-- 50-75%: 0.95x
-- 75-90%: 0.90x
-- Final 10%: 0.75x
-
-### leaderboard.json Format
-
-```json
-{
-  "updated_at": "2026-03-05T12:00:00Z",
-  "hackathon": {
-    "start": "2026-03-10T09:00:00Z",
-    "end": "2026-03-10T21:00:00Z"
-  },
-  "rankings": [
-    {
-      "rank": 1,
-      "team": "Team Alpha",
-      "repo": "awsbaku/test-team-alpha",
-      "cumulative_score": 7.2,
-      "pr_count": 3,
-      "latest_eval": {
-        "overall_score": 7.8,
-        "dimensions": {
-          "functional_value": 8,
-          "aws_integration": 7,
-          "innovation": 8,
-          "code_quality": 7,
-          "documentation": 9
-        }
-      },
-      "trend": "up"
-    }
-  ]
+interface TeamRanking {
+  rank: number;
+  team: string;                 // Display name
+  repo: string;                 // "awsbaku/team-slug"
+  cumulative_score: number;     // Aggregated with diminishing returns
+  pr_count: number;
+  latest_eval: {
+    overall_score: number;
+    dimensions: {
+      functional_value: number; // 0-10
+      aws_integration: number;
+      innovation: number;
+      code_quality: number;
+      documentation: number;
+    };
+  } | null;
+  trend: "up" | "down" | "stable";
 }
 ```
 
-## Terraform Module: `modules/hackathon-leaderboard`
+## Implementation Plan
 
-Located in `awsbaku/terraform-infrastructure` repo, following existing patterns.
+### Files to Create
 
-### Resources
+| File | Purpose |
+|------|---------|
+| `src/pages/leaderboard.tsx` | Main leaderboard page |
+| `src/components/sections/leaderboard-header.tsx` | Hero section with title, countdown, last updated |
+| `src/components/sections/leaderboard-table.tsx` | Rankings table with dimension breakdown |
+| `src/hooks/use-leaderboard.ts` | TanStack Query hook for fetching + polling |
+| `src/types/leaderboard.ts` | TypeScript interfaces |
 
-| Resource | Purpose |
-|----------|---------|
-| `aws_dynamodb_table.scores` | Store eval history |
-| `aws_lambda_function.receiver` | Process incoming evals |
-| `aws_lambda_function_url.receiver` | IAM-authed HTTP endpoint |
-| `aws_iam_role.lambda` | Lambda execution role (DynamoDB + S3) |
-| `aws_cloudwatch_log_group.lambda` | Lambda logs with retention |
+### Files to Modify
 
-### Module Interface
+| File | Change |
+|------|--------|
+| `src/App.tsx` | Add `/hackathon-leaderboard` route (lazy-loaded) |
 
-```hcl
-# Inputs
-variable "name_prefix"      # e.g. "awsbaku-infrastructure-org"
-variable "s3_bucket_name"    # existing public-frontend bucket
-variable "s3_bucket_arn"     # for IAM policy
-variable "s3_leaderboard_prefix" # default: "hackathon-leaderboard"
-variable "hackathon_start"   # ISO 8601
-variable "hackathon_end"     # ISO 8601
+### Step 1: TypeScript Types (`src/types/leaderboard.ts`)
 
-# Outputs
-output "function_url"        # Lambda Function URL (for GHA workflow)
-output "dynamodb_table_name" # For debugging/queries
-output "lambda_role_arn"     # For OIDC policy if needed
-```
+Define `LeaderboardData`, `TeamRanking`, `DimensionScores` interfaces matching the JSON shape above.
 
-### Environment Wiring (main.tf)
+### Step 2: Data Hook (`src/hooks/use-leaderboard.ts`)
 
-```hcl
-module "hackathon_leaderboard" {
-  source = "../../modules/hackathon-leaderboard"
-
-  name_prefix    = local.name_prefix
-  s3_bucket_name = module.cloudfront_app_public_frontend.s3_bucket_name
-  s3_bucket_arn  = module.cloudfront_app_public_frontend.s3_bucket_arn
+```typescript
+// TanStack Query hook with 30-second refetch interval
+export function useLeaderboard() {
+  return useQuery({
+    queryKey: ["leaderboard"],
+    queryFn: () => fetch("/hackathon-leaderboard/leaderboard.json").then(r => r.json()),
+    refetchInterval: 30_000,
+    staleTime: 10_000,
+  });
 }
 ```
 
-### GHA OIDC Role Update
+- Polls every 30 seconds (matches S3 CacheControl: max-age=30)
+- Returns `{ data, isLoading, error, dataUpdatedAt }`
+- `dataUpdatedAt` used for "last fetched X seconds ago" display
 
-The existing `gha_oidc` role needs `lambda:InvokeFunctionUrl` permission so GitHub Actions can POST to the Lambda. Add the leaderboard Lambda ARN to the OIDC module.
+### Step 3: Leaderboard Header (`src/components/sections/leaderboard-header.tsx`)
 
-## Workflow Integration
+- Event title: "AWS Bedrock Hackathon" with accent gradient
+- Hackathon countdown timer (reuse existing `useCountdown` hook)
+- "Last updated X seconds ago" using `dataUpdatedAt` from query
+- Back link to landing page
+- Uses `AuroraBackground` or `Meteors` for visual flair
+- `useScrollAnimation` + `fadeInUp` for entrance
 
-Add a step to `evaluate-prs.yml` after score posting:
+### Step 4: Leaderboard Table (`src/components/sections/leaderboard-table.tsx`)
 
-```yaml
-- name: Submit score to leaderboard
-  if: steps.verify.outputs.valid == 'true'
-  env:
-    LEADERBOARD_URL: ${{ vars.LEADERBOARD_URL }}
-  run: |
-    if [ -n "$LEADERBOARD_URL" ]; then
-      aws lambda invoke-function-url \
-        --url "$LEADERBOARD_URL" \
-        --http-method POST \
-        --body fileb://eval_result.json
-    fi
+**Desktop (md+)**: Full table layout
+| Rank | Team | Score | PRs | Functional | AWS | Innovation | Quality | Docs | Trend |
+|------|------|-------|-----|------------|-----|------------|---------|------|-------|
+
+**Mobile (<md)**: Card layout (stacked)
+```
+#1  Team Alpha          7.2
+    3 PRs | Latest: 7.8  ^
+    [expand for dimensions]
 ```
 
-Uses `aws lambda invoke-function-url` which automatically signs with the assumed OIDC role credentials.
+**Visual details:**
+- Rank #1: gold accent, #2: silver, #3: bronze (via Tailwind ring/border colors)
+- Score displayed with `NumberTicker` component (animated counting)
+- Trend arrow: Lucide `TrendingUp`/`TrendingDown`/`Minus` icons
+- Dimension scores as mini progress bars (colored by score: red < 4, yellow 4-7, green > 7)
+- Row expand/collapse for dimension details on click (Framer `AnimatePresence` + `motion.div`)
+- Stagger animation on initial load (`staggerContainer` + `staggerItem`)
 
-## Implementation Steps
+**Framer Motion for rank changes:**
+- Use `layout` prop on `motion.div` rows for automatic reorder animation
+- When rankings change on refetch, rows animate to new positions
+- `layoutId={team.repo}` ensures correct element tracking
 
-1. **Terraform module** (`modules/hackathon-leaderboard`) -- Lambda + DynamoDB + Function URL + IAM
-2. **Lambda function** (Python, bundled in module) -- receives POST, validates, writes DynamoDB, generates leaderboard.json, uploads to S3
-3. **Wire in environment** (`environments/infrastructure-org/main.tf`) -- instantiate module with existing bucket outputs
-4. **Update OIDC role** -- add `lambda:InvokeFunctionUrl` for the new Lambda
-5. **terraform plan** -- review and apply
-6. **Update evaluate-prs.yml** -- add leaderboard submission step
-7. **Set org variable** -- `LEADERBOARD_URL` pointing to Lambda Function URL
-8. **Frontend** -- add `/hackathon-leaderboard` route in React app
-9. **Test** -- trigger eval on test repos, verify leaderboard updates
+### Step 5: Leaderboard Page (`src/pages/leaderboard.tsx`)
+
+Composes the sections:
+```tsx
+export function LeaderboardPage() {
+  const { data, isLoading, error, dataUpdatedAt } = useLeaderboard();
+
+  return (
+    <main className="min-h-screen bg-background">
+      <LeaderboardHeader
+        hackathon={data?.hackathon}
+        updatedAt={data?.updated_at}
+        fetchedAt={dataUpdatedAt}
+      />
+      <LeaderboardTable
+        rankings={data?.rankings ?? []}
+        isLoading={isLoading}
+      />
+    </main>
+  );
+}
+```
+
+### Step 6: Route Registration (`src/App.tsx`)
+
+```tsx
+const LeaderboardPage = lazy(() =>
+  import("./pages/leaderboard").then(m => ({ default: m.LeaderboardPage }))
+);
+
+<Routes>
+  <Route path="/" element={<LandingPage />} />
+  <Route path="/hackathon-leaderboard" element={
+    <Suspense fallback={<LeaderboardSkeleton />}>
+      <LeaderboardPage />
+    </Suspense>
+  } />
+</Routes>
+```
+
+## Loading & Error States
+
+**Loading (skeleton):**
+- Header: shimmer placeholder for title + timer
+- Table: 5 skeleton rows with pulsing animation (Tailwind `animate-pulse`)
+
+**Error:**
+- "Failed to load leaderboard" message with retry button
+- Auto-retry after 10 seconds (TanStack Query `retry: 3`)
+
+**Empty (no rankings yet):**
+- "No scores yet -- evaluations will appear here during the hackathon"
+- Countdown to hackathon start if before start time
+
+## Accessibility
+
+- `role="log"` on leaderboard container with `aria-live="polite"`
+- `aria-atomic="false"` so only changed scores are announced
+- Proper `<table>` semantics on desktop with `<th scope="col">`
+- `aria-sort="descending"` on the Score column
+- Focus-visible outlines on expandable rows
+- Color-coded scores also have text labels (not color-only)
+
+## Testing Plan
+
+1. Create a mock `leaderboard.json` and place in `public/hackathon-leaderboard/`
+2. `npm run dev` and navigate to `/hackathon-leaderboard`
+3. Verify table renders, animations play, responsive layout works
+4. Trigger actual eval on test-team-alpha to populate real data in S3
+5. Verify live polling updates the table
+6. `npm run build` + `npm run preview` to test production build
+7. Deploy via tag and verify on awsbaku.tech/hackathon-leaderboard
 
 ## Status
 
-- [x] Evaluation pipeline working end-to-end
-- [x] Anti-gaming protections tested (prompt injection, multi-PR, protected files)
-- [x] Schema aligned with Claude output
-- [x] All changes synced to template and test repos
-- [ ] Terraform module for leaderboard infra
-- [ ] Lambda function implementation
-- [ ] Wire module in environment + terraform apply
-- [ ] Update OIDC role for Lambda invoke
-- [ ] Workflow integration (aws lambda invoke-function-url step)
-- [ ] Frontend leaderboard route in React app
-- [ ] End-to-end leaderboard test
+- [x] Backend: Lambda + DynamoDB + Function URL deployed
+- [x] Workflow: evaluate-prs.yml updated with leaderboard submission
+- [x] Secrets/Variables: AWS_ROLE_ARN + LEADERBOARD_URL set
+- [x] Codebase analysis: patterns, components, routing understood
+- [ ] TypeScript types
+- [ ] useLeaderboard hook
+- [ ] LeaderboardHeader section
+- [ ] LeaderboardTable section
+- [ ] LeaderboardPage + route
+- [ ] Loading/error/empty states
+- [ ] Mock data testing
+- [ ] End-to-end test with real eval
+- [ ] Production deploy
