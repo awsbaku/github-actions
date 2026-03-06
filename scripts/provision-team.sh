@@ -57,14 +57,23 @@ gh api "repos/$REPO" -X PATCH \
   --silent
 
 # 5. Set repo variables
-echo "[5/6] Setting repo variables..."
+echo "[5/7] Setting repo variables..."
 gh variable set TEAM_NAME --repo "$REPO" --body "$TEAM_NAME"
 gh variable set TEAM_SIZE --repo "$REPO" --body "$TEAM_SIZE"
 
 # 6. Set EVAL_ADMINS (org vars don't reach private repos on Free plan)
-echo "[6/6] Setting EVAL_ADMINS..."
+echo "[6/7] Setting EVAL_ADMINS..."
 ADMINS=$(gh variable get EVAL_ADMINS --org "$ORG" 2>/dev/null || echo '["tarlan-huseynov"]')
 gh variable set EVAL_ADMINS --repo "$REPO" --body "$ADMINS"
+
+# 7. Set LEADERBOARD_FUNCTION
+echo "[7/7] Setting LEADERBOARD_FUNCTION..."
+LEADERBOARD_FN=$(gh variable get LEADERBOARD_FUNCTION --org "$ORG" 2>/dev/null || echo "")
+if [ -n "$LEADERBOARD_FN" ]; then
+  gh variable set LEADERBOARD_FUNCTION --repo "$REPO" --body "$LEADERBOARD_FN"
+else
+  echo "  WARNING: LEADERBOARD_FUNCTION not set at org level — set manually per repo"
+fi
 
 echo ""
 echo "=== Done ==="
@@ -72,3 +81,8 @@ echo "Repo:        https://github.com/$REPO"
 echo "Team:        $TEAM_NAME ($TEAM_SIZE members)"
 echo "Branches:    main (eval target), development (default)"
 echo "Variables:   TEAM_NAME=$TEAM_NAME, TEAM_SIZE=$TEAM_SIZE, EVAL_ADMINS=$ADMINS"
+echo ""
+echo "IMPORTANT: Ensure these org-level secrets are accessible to the repo:"
+echo "  - CLAUDE_CODE_OAUTH_TOKEN"
+echo "  - AWS_ROLE_ARN"
+echo "On GitHub Free, you may need to set them at the repo level manually."

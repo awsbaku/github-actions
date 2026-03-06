@@ -1,17 +1,16 @@
 # Copy this file to your team repo at: .github/workflows/eval.yml
 #
 # Required org-level secrets:
-#   ANTHROPIC_API_KEY — Claude API key for evaluations
+#   CLAUDE_CODE_OAUTH_TOKEN — Claude OAuth token for evaluations
+#   AWS_ROLE_ARN            — IAM role for OIDC auth (leaderboard submission)
 #
 # Required org-level variables:
 #   EVAL_ADMINS — JSON array of GitHub usernames allowed to trigger manual evals
 #
 # Required repo-level variables:
-#   TEAM_NAME — Your team's display name (e.g., "Team Alpha")
-#   TEAM_SIZE — Number of team members (e.g., 3)
-#
-# The evaluation runs on a schedule, on PR events, and can be triggered
-# manually by organizers listed in EVAL_ADMINS.
+#   TEAM_NAME            — Your team's display name (e.g., "Team Alpha")
+#   TEAM_SIZE            — Number of team members (e.g., 3)
+#   LEADERBOARD_FUNCTION — Lambda function name for score submission
 
 name: Hackathon Evaluation
 run-name: "Hackathon Score — ${{ github.repository }}"

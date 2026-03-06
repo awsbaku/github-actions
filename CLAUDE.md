@@ -113,11 +113,11 @@ github-actions/
 ## Hackathon Setup Checklist
 
 1. Create this repo as `awsbaku/github-actions` on GitHub
-2. Set org-level secrets: `ANTHROPIC_API_KEY`
-3. Set org-level variables: `HACKATHON_START_TIME`, `HACKATHON_END_TIME`, `LEADERBOARD_URL`
-4. Per team repo: add `TEAM_NAME` and `TEAM_SIZE` as repo variables
+2. Set org-level secrets: `CLAUDE_CODE_OAUTH_TOKEN`, `AWS_ROLE_ARN`
+3. Set org-level variables: `EVAL_ADMINS`
+4. Per team repo: set variables `TEAM_NAME`, `TEAM_SIZE`, `LEADERBOARD_FUNCTION`
 5. Per team repo: copy `templates/team-caller-workflow.yml` to `.github/workflows/eval.yml`
-6. Set up leaderboard endpoint (S3 bucket or API) to receive POST requests
+6. Deploy leaderboard infrastructure (Lambda + DynamoDB + S3) via terraform
 7. Calibrate: run against 3-4 sample PRs and verify scores match expectations
 8. Set `hackathon_theme` in team caller workflows (default: `aws-bedrock`)
 9. Adjust rubric weights in the prompt template if needed (see `prompts/README.md`)
