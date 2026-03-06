@@ -291,20 +291,24 @@ jobs:
         if: always() && steps.verify.outputs.valid == 'true' && env.HAS_AWS_ROLE == 'true'
         env:
           HAS_AWS_ROLE: ${{ secrets.AWS_ROLE_ARN != '' }}
-          LEADERBOARD_URL: ${{ vars.LEADERBOARD_URL }}
+          LEADERBOARD_FUNCTION: ${{ vars.LEADERBOARD_FUNCTION }}
         run: |
-          if [ -z "$LEADERBOARD_URL" ]; then
-            echo "LEADERBOARD_URL not set — skipping"
+          if [ -z "$LEADERBOARD_FUNCTION" ]; then
+            echo "LEADERBOARD_FUNCTION not set — skipping"
             exit 0
           fi
-          curl --fail-with-body --silent --show-error \
-            --aws-sigv4 "aws:amz:${AWS_REGION}:lambda" \
-            --user "${AWS_ACCESS_KEY_ID}:${AWS_SECRET_ACCESS_KEY}" \
-            -H "x-amz-security-token: ${AWS_SESSION_TOKEN}" \
-            -H "Content-Type: application/json" \
-            -d @eval_result.json \
-            "$LEADERBOARD_URL" \
-            || echo "::warning::Failed to submit to leaderboard (non-fatal)"
+          RESPONSE=$(aws lambda invoke \
+            --function-name "$LEADERBOARD_FUNCTION" \
+            --payload fileb://eval_result.json \
+            --cli-binary-format raw-in-base64-out \
+            response.json 2>&1)
+          echo "$RESPONSE"
+          cat response.json
+          STATUS=$(echo "$RESPONSE" | grep -o '"StatusCode": [0-9]*' | grep -o '[0-9]*')
+          if [ "$STATUS" != "200" ]; then
+            echo "::error::Lambda invocation failed with status $STATUS"
+            exit 1
+          fi
 
       - name: Save evaluation artifact
         if: always() && steps.verify.outputs.valid == 'true'
