@@ -291,7 +291,6 @@ jobs:
         if: always() && steps.verify.outputs.valid == 'true' && env.HAS_AWS_ROLE == 'true'
         env:
           HAS_AWS_ROLE: ${{ secrets.AWS_ROLE_ARN != '' }}
-        env:
           LEADERBOARD_URL: ${{ vars.LEADERBOARD_URL }}
         run: |
           if [ -z "$LEADERBOARD_URL" ]; then
