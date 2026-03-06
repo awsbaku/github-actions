@@ -297,11 +297,13 @@ jobs:
             echo "LEADERBOARD_URL not set — skipping"
             exit 0
           fi
-          aws lambda invoke-function-url \
-            --function-url "$LEADERBOARD_URL" \
-            --http-method POST \
-            --body fileb://eval_result.json \
-            /dev/stdout \
+          curl --fail-with-body --silent --show-error \
+            --aws-sigv4 "aws:amz:${AWS_REGION}:lambda" \
+            --user "${AWS_ACCESS_KEY_ID}:${AWS_SECRET_ACCESS_KEY}" \
+            -H "x-amz-security-token: ${AWS_SESSION_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d @eval_result.json \
+            "$LEADERBOARD_URL" \
             || echo "::warning::Failed to submit to leaderboard (non-fatal)"
 
       - name: Save evaluation artifact
