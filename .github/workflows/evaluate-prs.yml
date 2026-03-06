@@ -297,16 +297,15 @@ jobs:
             echo "LEADERBOARD_FUNCTION not set — skipping"
             exit 0
           fi
-          RESPONSE=$(aws lambda invoke \
+          aws lambda invoke \
             --function-name "$LEADERBOARD_FUNCTION" \
             --payload fileb://eval_result.json \
             --cli-binary-format raw-in-base64-out \
-            response.json 2>&1)
-          echo "$RESPONSE"
+            response.json
+          echo "Lambda response:"
           cat response.json
-          STATUS=$(echo "$RESPONSE" | grep -o '"StatusCode": [0-9]*' | grep -o '[0-9]*')
-          if [ "$STATUS" != "200" ]; then
-            echo "::error::Lambda invocation failed with status $STATUS"
+          if grep -q '"error"' response.json; then
+            echo "::error::Lambda returned an error"
             exit 1
           fi
 
