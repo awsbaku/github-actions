@@ -8,9 +8,14 @@ inputs:
   title:
     description: Comment header text
     required: true
+  file:
+    description: Path to file containing the content to display
+    required: false
+    default: ''
   body:
-    description: Content to display inside collapsible details
-    required: true
+    description: Inline content (used if file is not provided)
+    required: false
+    default: ''
   status:
     description: Step outcome (success/failure) for the icon
     required: true
@@ -18,18 +23,36 @@ inputs:
     description: Code block format (e.g. hcl, json, or empty for plain)
     required: false
     default: ''
+  fallback:
+    description: Text to show when content is empty
+    required: false
+    default: 'No issues found.'
 
 runs:
   using: composite
   steps:
     - uses: actions/github-script@v8
+      env:
+        INPUT_FILE: ${{ inputs.file }}
+        INPUT_BODY: ${{ inputs.body }}
+        INPUT_FALLBACK: ${{ inputs.fallback }}
       with:
         script: |
+          const fs = require('fs');
           const marker = `<!-- ${{ inputs.marker }} -->`;
           const icon = '${{ inputs.status }}' === 'success' ? '✅' : '❌';
           const fmt = '${{ inputs.format }}';
-          const raw = process.env.COMMENT_BODY;
-          const content = raw.length === 0 ? 'No issues found.' : raw;
+
+          // Read from file if provided, otherwise use inline body
+          let raw = '';
+          const filePath = process.env.INPUT_FILE;
+          if (filePath && fs.existsSync(filePath)) {
+            raw = fs.readFileSync(filePath, 'utf8').trim();
+          } else {
+            raw = (process.env.INPUT_BODY || '').trim();
+          }
+
+          const content = raw.length === 0 ? process.env.INPUT_FALLBACK : raw;
           const truncated = content.length > 60000
             ? content.substring(0, 60000) + '\n\n... truncated ...'
             : content;
@@ -74,5 +97,3 @@ runs:
               body: body
             });
           }
-      env:
-        COMMENT_BODY: ${{ inputs.body }}
